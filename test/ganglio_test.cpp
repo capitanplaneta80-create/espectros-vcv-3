@@ -82,15 +82,97 @@ int main(int argc, char** argv) {
            a.pico, a.nan, vivasNueva, b.nan, c.nan, quieto ? "quieto" : "SE MOVIÓ", picoMel, nanMel, d.salto);
     if (a.nan || b.nan || c.nan || !quieto || nanMel || vivasNueva < 2) fallas++;
   }
-  {  // CPU
-    static Nucleo n; n = Nucleo(); n.init(sr);
+  {  // 2.3 · CANTO: notas por temperamento, cola de eventos equilibrada, alturas y velocidades válidas
+    printf("canto        | notas/min | on  off | vel mín–máx | Hz mín–máx | MIDI de ejemplo\n");
+    for (int t = 0; t < N_TEMPERAMENTOS; ++t) {
+      static Nucleo n; n = Nucleo(); n.temperamento = t; n.canta = true; n.init(sr);
+      int on = 0, off = 0; float vmn = 1, vmx = 0, hmn = 1e9f, hmx = 0; bool malo = false; Evento e; Evento ej = {};
+      const long M = (long)(60 * sr); double pico = 0;
+      for (long k = 0; k < M; ++k) {
+        float l, d; n.process(l, d); pico = std::max(pico, (double)std::max(fabsf(l), fabsf(d)));
+        while (n.sacarEvento(e)) {
+          if (e.on) { ++on; vmn = std::min(vmn, e.vel); vmx = std::max(vmx, e.vel); hmn = std::min(hmn, e.hz); hmx = std::max(hmx, e.hz); ej = e; }
+          else ++off;
+          if (!std::isfinite(e.hz) || e.hz <= 0 || e.neurona >= N) malo = true;
+        }
+      }
+      int nota; float cents; hzAMidi(ej.hz, nota, cents);
+      printf("%-12s | %9.1f | %3d %3d | %.2f–%.2f | %4.0f–%4.0f | n%d: %.1f Hz → %d %+.0f c\n", n.nombreTemperamento(), on / 1.0, on, off,
+             vmn, vmx, hmn, hmx, ej.neurona + 1, ej.hz, nota, cents);
+      if (malo || on == 0 || std::abs(on - off) > N || pico > 0.99) fallas++;
+    }
+    // umbral alto → menos notas
+    static Nucleo a; a = Nucleo(); a.umbral = 0.55f; a.init(sr); correr(a, 60, sr);
+    static Nucleo b; b = Nucleo(); b.umbral = 0.85f; b.init(sr); correr(b, 60, sr);
+    printf("umbral 0,55: %u notas · umbral 0,85: %u notas\n", a.nNotas, b.nNotas);
+  }
+  {  // 2.3 · LECTURA: con mezcla 1 los parámetros siguen vivos, sin NaN y sin saturar
+    static Nucleo n; n = Nucleo(); n.mezcla = 1.f; n.init(sr);
+    float mn[N], mx[N]; for (int i = 0; i < N; ++i) { mn[i] = 1; mx[i] = 0; }
+    R r; double pico = 0; int nan = 0;
+    for (long k = 0; k < (long)(60 * sr); ++k) {
+      float l, d; n.process(l, d); if (!std::isfinite(l)) nan++; pico = std::max(pico, (double)fabsf(l));
+      if (k > 10 * sr) for (int i = 0; i < N; ++i) { mn[i] = std::min(mn[i], n.canal[i]); mx[i] = std::max(mx[i], n.canal[i]); }
+    }
+    int vivos = 0; for (int i = 0; i < N; ++i) vivos += (mx[i] - mn[i]) > 0.15f;
+    n.nuevaLectura(); R r2 = correr(n, 20, sr);
+    // correlación entre parámetros: la lectura poblacional debe mezclarlos (mayor correlación media que el mapeo directo)
+    printf("lectura (mezcla 1): %d de 8 parámetros vivos · pico %.3f nan %d · nueva lectura: pico %.3f nan %d\n", vivos, pico, nan, r2.pico, r2.nan);
+    if (nan || r2.nan || vivos < 4 || pico > 0.99) fallas++;
+    (void)r;
+  }
+  {  // 2.3 · SENTIDOS: un tren de golpes por OÍDO produce ataques; ruido brillante vs. seno grave mueve el brillo
+    static Nucleo n; n = Nucleo(); n.escuchaExterna = true; n.init(sr);
+    Azar az; float brSeno = 0, brRuido = 0;
+    for (long k = 0; k < (long)(20 * sr); ++k) {
+      const float t = k / sr;
+      const bool golpes = t < 10.f;
+      const float fase = fmodf(t, 0.5f);
+      n.entrada = golpes ? (fase < 0.08f ? 0.6f * expf(-fase * 40.f) * az.bi() : 0.f)       // 2 golpes por segundo
+                         : (t < 15.f ? 0.4f * sinf(TWO_PI_F * 110.f * t) : 0.3f * az.bi()); // seno grave, luego ruido blanco
+      float l, d; n.process(l, d);
+      if (k == (long)(14.9f * sr)) brSeno = n.brillo;
+      if (k == (long)(19.9f * sr)) brRuido = n.brillo;
+      if (k == (long)(10 * sr)) printf("sentidos: %u ataques en 10 s de golpes (esperados ~20)", n.nAtaques);
+    }
+    printf(" · brillo seno 110 Hz %.3f · ruido blanco %.3f\n", brSeno, brRuido);
+    if (n.nAtaques < 12 || n.nAtaques > 30 || !(brRuido > brSeno + 0.3f)) fallas++;
+    static Nucleo s; s = Nucleo(); s.sensibilidad = 2.f; s.init(sr); R r = correr(s, 60, sr);
+    printf("sensibilidad 2 con su propio bordón: pico %.3f nan %d ataques %u\n", r.pico, r.nan, s.nAtaques);
+    if (r.nan || r.pico > 0.99) fallas++;
+  }
+  {  // 2.3 · PLASTICIDAD: el hábito crece, se acota, no mata a la red, sobrevive a exportar/importar y OLVIDAR lo borra
+    printf("plasticidad  | hábito 1 min  3 min  5 min | máx |D| | vivas a los 5 min | pico\n");
+    for (int t = 0; t < N_TEMPERAMENTOS; ++t) {
+      static Nucleo n; n = Nucleo(); n.temperamento = t; n.plasticidad = 1.f; n.init(sr);
+      float h[3]; R r;
+      r = correr(n, 60, sr); h[0] = n.habito();
+      r = correr(n, 120, sr); h[1] = n.habito();
+      r = correr(n, 120, sr); h[2] = n.habito();
+      float dmax = 0; for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) dmax = std::max(dmax, fabsf(n.D[i][j]));
+      int vivas = 0; for (int i = 0; i < N; ++i) vivas += (r.mx[i] - r.mn[i]) > 0.3f;
+      printf("%-12s | %10.2f %6.2f %6.2f | %7.2f | %d de 8 | %.3f\n", n.nombreTemperamento(), h[0], h[1], h[2], dmax, vivas, r.pico);
+      if (r.nan || r.pico > 0.99 || dmax > 8.001f || h[2] <= 0.f || vivas < 2) fallas++;
+    }
+    static Nucleo n; n = Nucleo(); n.plasticidad = 1.f; n.init(sr); correr(n, 90, sr);
+    float buf[Nucleo::TAM_MATRIZ]; n.exportarHabito(buf);
+    static Nucleo m; m = Nucleo(); m.init(sr); m.importarHabito(buf);
+    const bool igual = fabsf(m.habito() - n.habito()) < 1e-6f;
+    n.plasticidad = 0.f; const float h0 = n.habito(); correr(n, 30, sr); const bool quieto = n.habito() == h0;
+    n.olvidar();
+    printf("hábito: exportar/importar %s · con plasticidad 0 %s · olvidar → %.3f\n", igual ? "idéntico" : "DISTINTO",
+           quieto ? "se conserva" : "CAMBIÓ", n.habito());
+    if (!igual || !quieto || n.habito() != 0.f) fallas++;
+  }
+  {  // CPU, con las cuatro capas encendidas
+    static Nucleo n; n = Nucleo(); n.canta = true; n.mezcla = 1.f; n.plasticidad = 1.f; n.sensibilidad = 2.f; n.init(sr);
     auto t0 = std::chrono::steady_clock::now(); correr(n, 30, sr);
     double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     printf("CPU: %.2f %% de un núcleo (30 s en %.3f s) · estado: %u bytes\n", el / 30 * 100, el, (unsigned)sizeof(Nucleo));
   }
-  if (argc > 1) {  // demo de 90 s: GRILLO → CIGARRA (mutada) → LUCIÉRNAGA con melodía → ENJAMBRE estimulado
+  if (argc > 1) {  // demo de 130 s: GRILLO → CIGARRA (mutada) → LUCIÉRNAGA con melodía → ENJAMBRE estimulado → GRILLO que canta, lee y aprende
     static Nucleo n; n = Nucleo(); n.init(sr);
-    std::vector<float> wav; wav.reserve((size_t)(sr * 95 * 2));
+    std::vector<float> wav; wav.reserve((size_t)(sr * 135 * 2));
     correr(n, 20, sr, &wav);
     n.temperamento = 6; n.acorde = SEPTIMA; correr(n, 10, sr, &wav); n.mutar(); correr(n, 15, sr, &wav);
     n.temperamento = 5; n.filtro = LB; n.timbre = CAMPANA;
@@ -99,6 +181,11 @@ int main(int argc, char** argv) {
     n.temperamento = 2; n.acorde = RACIMO; n.metabolismo = 2.f; correr(n, 8, sr, &wav);
     n.estimulo[4] = 3.f; correr(n, 4, sr, &wav); n.estimulo[4] = 0.f; n.estimulo[6] = -3.f; correr(n, 4, sr, &wav); n.estimulo[6] = 0.f;
     n.sacudir(); correr(n, 14, sr, &wav);
+    // 2.3: GRILLO canta con la campana, la lectura se mezcla y la red aprende (metabolismo ×2 para oírlo en 40 s)
+    n.temperamento = 0; n.acorde = SEPTIMA; n.filtro = LP; n.canta = true; n.timbre = CAMPANA; n.metabolismo = 2.f;
+    correr(n, 12, sr, &wav);
+    n.mezcla = 1.f; correr(n, 12, sr, &wav);
+    n.plasticidad = 1.f; correr(n, 16, sr, &wav);
     escribirWav(argv[1], wav, (int)sr);
     printf("demo: %s (%.0f s)\n", argv[1], wav.size() / 2 / sr);
   }

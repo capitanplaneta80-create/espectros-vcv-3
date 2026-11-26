@@ -1,7 +1,7 @@
 {
   "slug": "Espectros",
   "name": "ESPECTROS",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "license": "GPL-3.0-or-later",
   "brand": "ESPECTROS",
   "author": "Mauricio Vásquez Arias",
@@ -29,14 +29,15 @@
     {
       "slug": "Ganglio",
       "name": "GANGLIO",
-      "description": "Un cerebro de insecto: red neuronal recurrente de 8 neuronas (CTRNN) que late sola y mueve un bordón FM, con temperamentos, estímulo por neurona y escucha",
+      "description": "Un cerebro de insecto: red neuronal recurrente de 8 neuronas (CTRNN) que late sola, canta notas microtonales, escucha nivel, brillo y ataques, y aprende por plasticidad hebbiana; mueve un bordón FM",
       "tags": [
         "Oscillator",
         "Drone",
         "Random",
         "Visual",
         "Polyphonic",
-        "Synth voice"
+        "Synth voice",
+        "Sequencer"
       ]
     },
     {

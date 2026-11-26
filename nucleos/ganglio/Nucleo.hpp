@@ -17,6 +17,17 @@
 //
 // Los 8 temperamentos son los del firmware Ganglio del Cardputer (Temperamentos.hpp). El cerebro corre a
 // tasa de control (cada 32 muestras) y la síntesis interpola dentro de cada bloque: nunca hay saltos.
+//
+// Cuatro capas sobre la red (2.3):
+//   CANTO       cada neurona que cruza el UMBRAL emite una nota: altura microtonal del acorde del bordón,
+//               velocidad según lo rápido que subió. Sale como cola de eventos (para MIDI en el Cardputer)
+//               y como estado por neurona (V/OCT y compuerta en VCV). Con «canta», la voz interna la toca.
+//   LECTURA     mapeo poblacional: con MEZCLA > 0 cada parámetro de la síntesis lee una combinación de las 8
+//               neuronas (matriz L, al azar y reproducible) en vez de una sola.
+//   SENTIDOS    el oído distingue cambios de nivel (neuronas 1 y 8), de brillo (5 y 7, en contrapunto) y
+//               ataques (pulso a la neurona más dormida). SENSIBILIDAD escala los tres.
+//   PLASTICIDAD regla hebbiana de covarianza con olvido: dD/dt = η·(k·(o_i−ō_i)(o_j−ō_j) − D/τ). La red efectiva es
+//               W + D, con sesgos que se corrigen para seguir siendo center-crossing. D es el «hábito».
 #pragma once
 #include <math.h>
 #include <stdint.h>
@@ -65,6 +76,17 @@ struct Azar {
 static inline float sigma(float x) { return 1.f / (1.f + expf(-x)); }
 static inline float clampf(float x, float a, float b) { return x < a ? a : (x > b ? b : x); }
 
+// un evento del CANTO: la neurona i se encendió (on) o se apagó
+struct Evento { uint8_t neurona; uint8_t on; float hz; float vel; };
+
+// de Hz a nota MIDI más cercana + desvío en cents (para pitch bend en el Cardputer)
+static inline void hzAMidi(float hz, int& nota, float& cents) {
+  const float m = 69.f + 12.f * log2f(hz / 440.f);
+  nota = (int)floorf(m + 0.5f);
+  nota = nota < 0 ? 0 : (nota > 127 ? 127 : nota);
+  cents = (m - nota) * 100.f;
+}
+
 // filtro de variable de estado TPT (Zavalishin): estable aunque se module rápido
 struct SVF {
   float ic1 = 0, ic2 = 0, a1 = 1, a2 = 0, a3 = 0;
@@ -96,6 +118,20 @@ class Nucleo {
   // escucha externa: si el adaptador tiene una entrada de audio, el cerebro escucha eso en vez del bordón
   bool escuchaExterna = false;
   float entrada = 0.f;           // muestra de audio externa (±1)
+  // capas 2.3
+  float umbral = 0.6f;           // CANTO: una neurona canta al pasar de aquí (0,5–0,9); se apaga 0,2 más abajo
+  bool canta = false;            // CANTO: la voz interna toca las notas de las neuronas
+  float mezcla = 0.f;            // LECTURA: 0 = cada neurona su parámetro · 1 = combinaciones de las 8
+  float sensibilidad = 1.f;      // SENTIDOS: 0–2, escala nivel, brillo y ataques
+  float plasticidad = 0.f;       // PLASTICIDAD: 0 = no aprende (el hábito se conserva) · 1 = τ de 60 s
+
+  // ---------------------------------------------------------------- CANTO: cola de eventos
+  // el adaptador los saca con sacarEvento(); si nadie los saca, los más viejos se descartan
+  bool sacarEvento(Evento& e) {
+    if (evLee_ == evEscribe_) return false;
+    e = cola_[evLee_]; evLee_ = (evLee_ + 1) % COLA; return true;
+  }
+  void vaciarEventos() { evLee_ = evEscribe_; }
 
   // melodía (monofónica): cada nota también da un pulso a una neurona
   int timbre = PURO;
@@ -106,6 +142,7 @@ class Nucleo {
   }
   void notaOff() { mel_.gate = false; }
   void tonoMelodia(float hz) { mel_.hz = hz; }   // glissando sin volver a disparar
+  float melHz() const { return mel_.hz; }
 
   // ---------------------------------------------------------------- estado que la interfaz dibuja
   float y[N] = {}, o[N] = {};                    // potencial y salida de cada neurona
@@ -119,6 +156,18 @@ class Nucleo {
   float nivelBordon = 0.f;       // envolvente del bordón (lo que escucha el cerebro)
   float transicion = 1.f;        // 0 → 1 durante el cambio de temperamento
   float fcVivo = 1000.f, qVivo = 1.f, fmVivo = 0.f, plegVivo = 1.f;
+  // capas 2.3
+  float cantoHz[N] = {}, cantoVel[N] = {};       // última nota de cada neurona (se sostiene mientras está alta)
+  uint32_t nNotas = 0;                            // cuenta de notas emitidas
+  float canal[N] = {};                            // lo que lee la síntesis tras la LECTURA (0–1)
+  float L[N][N] = {};                             // matriz de lectura: fila k = parámetro k, columna j = neurona j
+  float D[N][N] = {};                             // hábito: lo aprendido, se suma a W
+  float brillo = 0.f;                             // 0–1: fracción de energía sobre ~2 kHz en lo que se oye
+  uint32_t nAtaques = 0;                          // cuenta de ataques oídos (el adaptador detecta el cambio)
+  float habito() const {                          // cuánto se ha apartado la red de su temperamento (RMS de D)
+    float s = 0.f; for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) s += D[i][j] * D[i][j];
+    return sqrtf(s / (N * (N - 1)));
+  }
 
   void init(float sr) {
     sr_ = sr; isr_ = 1.f / sr;
@@ -129,6 +178,12 @@ class Nucleo {
     for (int i = 0; i < N; ++i) { y[i] = 0.4f * azar_.bi(); o[i] = sigma(y[i] + theta[i]); }
     cuenta_ = 0; quietud_ = 0.f; eegT_ = 0.f; eegCabeza = eegCuenta = 0;
     for (int k = 0; k < 4; ++k) { fase_[k] = faseM_[k] = 0.f; fb_[k] = 0.f; }
+    memset(D, 0, sizeof D); memset(thD_, 0, sizeof thD_);
+    for (int i = 0; i < N; ++i) { media_[i] = o[i]; cantoHz[i] = tonicaHz; cantoVel[i] = 0.f; }
+    evLee_ = evEscribe_ = 0; vozDueno_ = -1;
+    lpB_ = eTot_ = eHp_ = envR_ = envL_ = refr_ = brillo = brilloLento_ = 0.f; ataquePend_ = false;
+    lecturaDeFabrica();   // siempre la misma
+    coeficientes();
     mapear(); for (int i = 0; i < NP; ++i) pAct_[i] = pObj_[i];
     svfL_.ajustar(sr_, fcVivo, qVivo); svfR_.ajustar(sr_, fcVivo, qVivo);
   }
@@ -138,6 +193,19 @@ class Nucleo {
     sr_ = sr; isr_ = 1.f / sr;
     salL_.init(sr); salR_.init(sr);
     svfL_.ajustar(sr_, fcVivo, qVivo); svfR_.ajustar(sr_, fcVivo, qVivo);
+    coeficientes();
+  }
+
+  // ---------------------------------------------------------------- LECTURA y PLASTICIDAD: gestos y memoria
+  void nuevaLectura() { generarLectura(azar_); }
+  void lecturaDeFabrica() { Azar a; a.s = 0x6c8e9cf5u; generarLectura(a); }
+  void olvidar() { memset(D, 0, sizeof D); }
+  static const int TAM_MATRIZ = N * N;
+  void exportarLectura(float* r) const { memcpy(r, L, sizeof L); }
+  void importarLectura(const float* r) { memcpy(L, r, sizeof L); }
+  void exportarHabito(float* r) const { memcpy(r, D, sizeof D); }
+  void importarHabito(const float* r) {
+    for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) D[i][j] = (i == j) ? 0.f : clampf(r[i * N + j], -D_MAX, D_MAX);
   }
 
   // guardar y recuperar la red vigente (pesos, τ y sesgos): una red mutada o nueva sobrevive al patch o a la SD
@@ -218,8 +286,10 @@ class Nucleo {
     else { yl = 0.6f * lpL + 0.9f * bpL; yr = 0.6f * lpR + 0.9f * bpR; }
 
     const float env = fabsf(yl) + fabsf(yr);
-    nivelBordon += (env - nivelBordon) * (env > nivelBordon ? 0.002f : 0.0002f);
+    if (!(env == env)) { svfL_ = SVF(); svfR_ = SVF(); }   // guarda contra NaN en el filtro
+    else nivelBordon += (env - nivelBordon) * (env > nivelBordon ? 0.002f : 0.0002f);
     if (escuchaExterna) { const float e = fabsf(entrada); envExt_ += (e - envExt_) * (e > envExt_ ? 0.002f : 0.0002f); }
+    sentir(escuchaExterna ? entrada : 0.5f * (yl + yr));
 
     // melodía
     const float mel = melodia();
@@ -250,11 +320,73 @@ class Nucleo {
   float frecuencia_[4] = {55.f, 82.5f, 110.f, 165.f};
   float fase_[4], faseM_[4], fb_[4];
   struct Melodia { float hz = 440.f, vel = 1.f, env = 0.f, edad = 0.f, fase = 0.f, faseM = 0.f, faseS = 0.f; bool gate = false; } mel_;
+  // CANTO
+  static const int COLA = 32;
+  Evento cola_[COLA];
+  int evLee_ = 0, evEscribe_ = 0, vozDueno_ = -1;
+  // SENTIDOS (por muestra)
+  float lpB_ = 0.f, eTot_ = 0.f, eHp_ = 0.f, envR_ = 0.f, envL_ = 0.f, refr_ = 0.f, brilloLento_ = 0.f;
+  float cB_ = 0.f, cE_ = 0.f, cRa_ = 0.f, cRr_ = 0.f, cL_ = 0.f;
+  bool ataquePend_ = false;
+  // PLASTICIDAD
+  static constexpr float D_MAX = 8.f;
+  float media_[N] = {}, thD_[N] = {};
+
+  void coeficientes() {
+    cB_ = 1.f - expf(-TWO_PI_F * 2000.f * isr_);      // paso bajo de 2 kHz (lo que queda arriba es el brillo)
+    cE_ = 1.f - expf(-isr_ / 0.05f);                   // energías, 50 ms
+    cRa_ = 1.f - expf(-isr_ / 0.001f);                 // envolvente rápida: ataque 1 ms, caída 10 ms
+    cRr_ = 1.f - expf(-isr_ / 0.01f);
+    cL_ = 1.f - expf(-isr_ / 0.15f);                   // envolvente lenta, 150 ms
+  }
+
+  // SENTIDOS: brillo y ataques de lo que oye el cerebro, una muestra
+  inline void sentir(float x) {
+    lpB_ += (x - lpB_) * cB_;
+    const float hp = x - lpB_;
+    eTot_ += (x * x - eTot_) * cE_; eHp_ += (hp * hp - eHp_) * cE_;
+    const float ax = fabsf(x);
+    envR_ += (ax - envR_) * (ax > envR_ ? cRa_ : cRr_);
+    envL_ += (ax - envL_) * cL_;
+    if (refr_ > 0.f) refr_ -= isr_;
+    else if (envR_ > 1.8f * envL_ + 0.01f) { ataquePend_ = true; refr_ = 0.09f; }   // período refractario de 90 ms
+  }
+
+  void empujarEvento(int i, bool on, float hz, float vel) {
+    Evento& e = cola_[evEscribe_];
+    e.neurona = (uint8_t)i; e.on = on ? 1 : 0; e.hz = hz; e.vel = vel;
+    evEscribe_ = (evEscribe_ + 1) % COLA;
+    if (evEscribe_ == evLee_) evLee_ = (evLee_ + 1) % COLA;   // llena: se pierde el más viejo
+  }
+  // CANTO: la neurona i cruzó el umbral subiendo a `ritmo` (unidades de o por segundo)
+  void cantar(int i, float ritmo) {
+    const float hz = frecuencia_[i & 3] * (i < 4 ? 2.f : 4.f);   // 1–4 una octava arriba del bordón, 5–8 dos
+    // velocidad: de 0,3 a 20 unidades/s (medido en los 8 temperamentos: p10 ≈ 0,4 · p50 ≈ 5 · p90 ≈ 16), logarítmica
+    const float vel = 0.25f + 0.75f * clampf(log2f(fmaxf(fabsf(ritmo), 1e-3f) / 0.3f) * (1.f / 6.06f), 0.f, 1.f);
+    cantoHz[i] = hz; cantoVel[i] = vel; ++nNotas;
+    empujarEvento(i, true, hz, vel);
+    if (canta) { mel_.hz = hz; mel_.vel = vel; mel_.gate = true; mel_.edad = 0.f; vozDueno_ = i; }
+  }
+  void callar(int i) {
+    empujarEvento(i, false, cantoHz[i], 0.f);
+    if (vozDueno_ == i) { if (canta) mel_.gate = false; vozDueno_ = -1; }
+  }
+  // LECTURA: filas al azar de norma 1, con un peso extra en la diagonal para que no se pierda del todo el mapeo original
+  void generarLectura(Azar& a) {
+    for (int k = 0; k < N; ++k) {
+      float s = 0.f;
+      for (int j = 0; j < N; ++j) { L[k][j] = a.gauss() + (j == k ? 1.f : 0.f); s += L[k][j] * L[k][j]; }
+      s = 1.f / sqrtf(s + 1e-9f);
+      for (int j = 0; j < N; ++j) L[k][j] *= s;
+    }
+  }
 
   inline float sen(float fase) const {           // seno por tabla, fase en vueltas
     fase -= floorf(fase);
-    const float x = fase * TAB; const int i = (int)x; const float f = x - i;
-    return seno_[i] + (seno_[i + 1] - seno_[i]) * f;
+    // con fase ≈ −1e−9, fase − floor(fase) redondea a 1,0 exacto: sin esta guarda se leería fuera de la tabla
+    const float x = fase * TAB; int i = (int)x; if (i >= TAB || i < 0) i = 0;
+    const float f = x - (float)(int)x;
+    return seno_[i] + (seno_[i + 1] - seno_[i]) * (f >= 0.f && f < 1.f ? f : 0.f);
   }
 
   static void centrar(float Wm[N][N], float th[N]) {   // sesgos center-crossing
@@ -312,33 +444,74 @@ class Nucleo {
     {
       const float oido = escuchaExterna ? envExt_ : nivelBordon;
       oidoLento_ += (oido - oidoLento_) * (1.f - expf(-dtReal / 4.f));
+      const float sens = clampf(sensibilidad, 0.f, 2.f);
       if (escucha) {
         const float c = clampf((oido - oidoLento_) / (oidoLento_ + 0.05f), -1.f, 1.f);
-        I[0] += 1.5f * c;
-        I[7] -= 1.5f * c;
+        I[0] += 1.5f * sens * c;
+        I[7] -= 1.5f * sens * c;
+      }
+      // brillo: más brillante que su promedio de ~4 s → cierra el filtro (7) y abre la FM (5): contrapunto
+      // (con su propio bordón es realimentación negativa y estabiliza; con otro instrumento, le contesta)
+      brillo = eTot_ > 1e-9f ? clampf(eHp_ / eTot_, 0.f, 1.f) : 0.f;
+      brilloLento_ += (brillo - brilloLento_) * (1.f - expf(-dtReal / 4.f));
+      if (escucha) {
+        const float cb = clampf(4.f * (brillo - brilloLento_), -1.f, 1.f);
+        I[6] -= 1.2f * sens * cb;
+        I[4] += 1.2f * sens * cb;
+      }
+      // ataques: cada golpe que oye despierta a la neurona más dormida (solo con OÍDO: el bordón no tiene golpes,
+      // y sus propias fluctuaciones rápidas no deben contar como tales)
+      if (ataquePend_) {
+        ataquePend_ = false;
+        if (escucha && escuchaExterna && sens > 0.f) {
+          int k = 0; for (int i = 1; i < N; ++i) if (o[i] < o[k]) k = i;
+          pulso_[k] += 2.2f * sens; ++nAtaques;
+        }
       }
     }
 
+    // red efectiva: W + hábito, con sesgos corregidos para seguir siendo center-crossing
+    for (int i = 0; i < N; ++i) { float s = 0.f; for (int j = 0; j < N; ++j) s += D[i][j]; thD_[i] = -0.5f * s; }
+
     // integración (Euler–Maruyama); el metabolismo escala el tiempo de la red
+    const float dt = dtReal * clampf(metabolismo, 0.125f, 8.f);
     if (!congelado) {
-      const float dt = dtReal * clampf(metabolismo, 0.125f, 8.f);
       const float sq = sqrtf(dt);
-      for (int i = 0; i < N; ++i) o[i] = sigma(y[i] + theta[i]);
+      for (int i = 0; i < N; ++i) o[i] = sigma(y[i] + theta[i] + thD_[i]);
       for (int i = 0; i < N; ++i) {
         float s = I[i];
-        for (int j = 0; j < N; ++j) s += W[i][j] * o[j];
+        for (int j = 0; j < N; ++j) s += (W[i][j] + D[i][j]) * o[j];
         y[i] += dt * (s - y[i]) / tau[i];
         if (ruido > 0.f) y[i] += ruido * sq * azar_.gauss() / tau[i];
-        y[i] = clampf(y[i], -30.f, 30.f);
+        y[i] = y[i] == y[i] ? clampf(y[i], -30.f, 30.f) : 0.f;   // guarda contra NaN: la red nunca se envenena
       }
     }
     float mov = 0.f;
     cruces = 0;
+    const float on = clampf(umbral, 0.5f, 0.9f), off = on - 0.2f;
     for (int i = 0; i < N; ++i) {
-      o[i] = sigma(y[i] + theta[i]);
-      mov += fabsf(o[i] - oPrev_[i]); oPrev_[i] = o[i];
-      if (!(activas & (1 << i)) && o[i] > 0.6f) { activas |= (1 << i); cruces |= (1 << i); }
-      else if ((activas & (1 << i)) && o[i] < 0.4f) activas &= ~(1 << i);
+      o[i] = sigma(y[i] + theta[i] + thD_[i]);
+      const float d = o[i] - oPrev_[i];
+      mov += fabsf(d); oPrev_[i] = o[i];
+      if (!(activas & (1 << i)) && o[i] > on) { activas |= (1 << i); cruces |= (1 << i); cantar(i, d / dtReal); }
+      else if ((activas & (1 << i)) && o[i] < off) { activas &= ~(1 << i); callar(i); }
+    }
+    if (!canta && vozDueno_ >= 0) vozDueno_ = -1;
+
+    // PLASTICIDAD (hebbiana de covarianza con olvido); con plasticidad 0 el hábito queda como está
+    if (!congelado) {
+      const float am = 1.f - expf(-dt / 8.f);
+      for (int i = 0; i < N; ++i) media_[i] += (o[i] - media_[i]) * am;
+      const float eta = clampf(plasticidad, 0.f, 1.f);
+      if (eta > 0.f) {
+        const float k = 0.33f, tauOlvido = 60.f, g = eta * dt;
+        float dv[N];
+        for (int i = 0; i < N; ++i) dv[i] = o[i] - media_[i];
+        for (int i = 0; i < N; ++i) for (int j = 0; j < N; ++j) {
+          if (i == j) continue;
+          D[i][j] = clampf(D[i][j] + g * (k * dv[i] * dv[j] - D[i][j] / tauOlvido), -D_MAX, D_MAX);
+        }
+      }
     }
 
     // vigía: si la red se queda quieta más de 10 s, la despierta
@@ -369,6 +542,18 @@ class Nucleo {
     float oi[N];
     const float in = clampf(intensidad, 0.25f, 1.5f);
     for (int i = 0; i < N; ++i) oi[i] = clampf(0.5f + (o[i] - 0.5f) * in, 0.f, 1.f);
+    // LECTURA poblacional: cada parámetro lee una combinación de las 8 neuronas
+    const float m = clampf(mezcla, 0.f, 1.f);
+    if (m > 0.f) {
+      float c[N];
+      for (int k = 0; k < N; ++k) {
+        float z = 0.f;
+        for (int j = 0; j < N; ++j) z += L[k][j] * (oi[j] - 0.5f);
+        c[k] = sigma(5.f * z);
+      }
+      for (int k = 0; k < N; ++k) oi[k] += (c[k] - oi[k]) * m;
+    }
+    for (int k = 0; k < N; ++k) canal[k] = oi[k];
     const int ac = acorde < 0 ? 0 : (acorde >= N_ACORDES ? N_ACORDES - 1 : acorde);
     for (int k = 0; k < 4; ++k) {
       pObj_[P_A0 + k] = oi[k] * sqrtf(oi[k]);

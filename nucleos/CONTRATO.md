@@ -63,5 +63,5 @@ Además, cada núcleo tiene su prueba en `test/`: corre minutos de audio sin el 
 | Núcleo | Estado en memoria | CPU en el computador | Cortex-M7 |
 |---|---|---|---|
 | LYAPUNOV | 20 KB | 0,7 % de un núcleo | compila |
-| GANGLIO | 14 KB | 0,8 % de un núcleo | compila |
+| GANGLIO | 15 KB (con canto, lectura, sentidos y plasticidad) | 1,2 % de un núcleo | compila |
 | RYDBERG | 29 KB | 1,1 % de un núcleo | compila |

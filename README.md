@@ -145,6 +145,7 @@ En la biblioteca de VCV hay pocas redes neuronales, y ninguna es un sistema din�
 - **Escucha.** El sonido vuelve al cerebro: oye los cambios de su propio bordón o, con OÍDO conectado, cualquier otro instrumento.
 - **Se ve pensar.** A la izquierda, el ganglio: tamaño = lentitud (τ), brillo = actividad, conexiones en oro (excitan) y turquesa (inhiben). A la derecha, el electroencefalograma de los últimos 9 segundos.
 - **Su cerebro sale como voltaje.** 8 canales continuos, 8 compuertas y un pulso para mover cualquier otro módulo.
+- **Canta, lee, escucha y aprende (2.3).** Cada neurona que cruza el umbral canta una nota microtonal; la síntesis puede leer combinaciones de neuronas; el oído distingue nivel, brillo y ataques; y la red aprende por plasticidad hebbiana.
 
 ## Qué mueve cada neurona
 
@@ -171,13 +172,58 @@ En la biblioteca de VCV hay pocas redes neuronales, y ninguna es un sistema din�
 
 Al cambiar de temperamento, la red transita 1,5 s hacia el nuevo. MUTAR altera la red actual y RED NUEVA crea otra con la misma arquitectura. Una red mutada se guarda con el patch; FÁBRICA vuelve al temperamento original.
 
-## El panel (24 HP)
+## Cuatro capas sobre la red (versión 2.3)
+
+### Canto: las neuronas como eventos
+
+Cuando una neurona pasa del **UMBRAL** (50–90 %) canta una nota, y se calla 20 puntos más abajo.
+
+- **Altura:** sale del acorde del bordón, con su desafinación viva. Las neuronas 1–4 cantan una octava arriba de su oscilador y las 5–8, dos octavas arriba. Las notas no están en temperamento igual.
+- **Velocidad:** depende de lo rápido que subió la neurona. Un despertar brusco suena fuerte y uno lento, suave.
+- **CANTA:** la voz interna toca esas notas con el TIMBRE elegido. CAMPANA es la más cercana a un grillo.
+- **Salidas:** CANTO V/O y VEL (8 canales), ÚLTIMA (V/OCT monofónico, para un sintetizador de una voz o el CM1A). DISPAROS siguen el mismo umbral.
+
+El núcleo también entrega las notas como una cola de eventos con Hz y velocidad, más una función que convierte Hz en nota MIDI con desvío en cents. Es lo que usará el Cardputer para tocar por MIDI, con pitch bend para los microtonos.
+
+### Lectura: del mapeo uno a uno al poblacional
+
+Con **MEZCLA** en 0, cada neurona mueve su parámetro, como siempre. En 100 %, cada parámetro lee una combinación de las 8 neuronas mediante una matriz de lectura: filas al azar de norma 1, con algo de peso en la diagonal. Así el timbre depende de *patrones* de actividad y no de neuronas sueltas.
+
+- **NUEVA LECTURA** (botón y disparo) sortea otra matriz.
+- La lectura se guarda con el patch, y el menú contextual la devuelve a la de fábrica.
+- **CANALES** saca lo que realmente lee la síntesis (8 canales).
+
+### Sentidos: un oído con tres órganos
+
+Con ESCUCHA encendida, el cerebro oye su bordón o, si OÍDO está conectado, otro instrumento.
+
+- **Nivel:** los cambios de volumen excitan la neurona 1 e inhiben la 8 (como antes).
+- **Brillo:** es la fracción de energía sobre ~2 kHz. Cuando el sonido es más brillante que su promedio de 4 s, el cerebro cierra el filtro (neurona 7) y abre la FM (neurona 5). Con su propio bordón, este contrapunto estabiliza; con otro instrumento, le contesta en el registro opuesto.
+- **Ataques:** solo cuentan los de OÍDO. Cada golpe despierta a la neurona más dormida, y si esa neurona cruza el umbral, canta. Es un diálogo de llamada y respuesta.
+- **SENTIDOS** escala los tres de 0 a 200 %. Hay salidas de ATAQUES (disparo) y BRILLO (0–10 V).
+
+### Plasticidad: la red aprende
+
+**PLASTICIDAD** activa una regla de Hebb de covarianza con olvido. Las neuronas que se mueven juntas refuerzan su conexión y las que se oponen la vuelven inhibitoria:
+
+    dD_ij/dt = η · ( k · (o_i − ō_i)(o_j − ō_j) − D_ij / 60 s )
+
+- La red efectiva es **W + D**. Los sesgos se corrigen para seguir siendo *center-crossing*, el régimen más vivo de una CTRNN.
+- D se acota a ±8. En 100 %, la red cambia en alrededor de un minuto. En 0, no aprende, pero conserva lo aprendido, así que puedes dejar que aprenda y luego fijar el hábito.
+- El **hábito** se guarda con el patch. **OLVIDAR** (botón y disparo) lo borra. FÁBRICA no lo borra: devuelve el temperamento, no la memoria.
+- La segunda pantalla dibuja D como una matriz 8×8 (oro refuerza, turquesa inhibe) junto a las barras de la lectura y la última nota cantada. **HÁBITO** sale como voltaje.
+
+Algunos temperamentos se transforman al aprender. Tras 5 minutos de plasticidad máxima, LIBÉLULA a veces se aquieta en un ciclo más simple. Si pasa, OLVIDAR la devuelve.
+
+## El panel (34 HP)
 
 - **Fila 1 · el cerebro:** TEMPERAMENTO, METABOLISMO (×0,125 a ×8: escala todo el tiempo de la red), INTENSIDAD (cuánto mueve el cerebro al sonido), RUIDO sináptico, TÓNICA del bordón, NIVEL.
 - **Fila 2 · el sonido:** ACORDE del bordón (quinta, cuarta, séptima natural 4:5:6:7, armónicos, racimo de cuartos de tono), FILTRO (LP, BP o ambos), TIMBRE de la melodía (puro, FM2, campana, sub, metal), ESCUCHA, BORDÓN y CONGELAR.
 - **Gestos (botón + disparo):** SACUDIR, MUTAR, RED NUEVA, FÁBRICA.
 - **Entradas:** V/OCT de la tónica, CV de temperamento, metabolismo, intensidad y ruido, ESTÍMULO (polifónico, canal i → neurona i), melodía (V/OCT y compuerta), CONGELAR y OÍDO (audio externo).
 - **Salidas:** NEURONAS (8 canales, 0–10 V), DISPAROS (8 compuertas), PULSO, OÍDO (lo que escucha el cerebro), IZQ y DER.
+- **Sección derecha (2.3):** perillas UMBRAL, MEZCLA, SENTIDOS y PLASTICIDAD; NUEVA LECTURA y OLVIDAR (botón y disparo); CANTA; CV de lectura, sentidos, plasticidad y umbral; salidas CANTO V/O, VEL, ÚLTIMA, CANALES, ATAQUES, BRILLO y HÁBITO.
+- **MEL GATE** ahora es polifónico: un acorde desde Ecotono o desde un MIDI-CV da un pulso por nota.
 
 ## Ideas de patch
 
@@ -185,6 +231,10 @@ Al cambiar de temperamento, la red transita 1,5 s hacia el nuevo. MUTAR altera l
 2. **Oír a un sintetizador.** La salida de tu Hydrasynth a OÍDO: cada frase cambia el ritmo de la red, y la red responde con el bordón.
 3. **Ritmo de insecto.** DISPAROS a un módulo de percusión, canal por canal. GRILLO da un pulso regular; ENJAMBRE, uno que nunca se repite.
 4. **Tocar un cerebro.** Un teclado MIDI a MEL V/O y MEL GATE con el timbre CAMPANA: cada nota empuja a una neurona y la red responde.
+5. **Grillo que canta a otro.** CANTO V/O y DISPAROS a Plaits o Rings (polifónicos), con CANTA apagado: la red compone y otro módulo suena.
+6. **Conversación.** Un loop de percusión a OÍDO con SENTIDOS al 150 %: cada golpe despierta a una neurona dormida y la red contesta con una nota.
+7. **Costumbre.** PLASTICIDAD al 100 % durante unos minutos, luego en 0: guarda el patch y la red recordará el hábito que aprendió esa noche.
+8. **Al modular, por el CM1A.** ÚLTIMA y PULSO al módulo CV-MIDI de VCV, y de ahí al Behringer CM1A, que vuelve las notas voltaje para el rack físico. El MIDI llega a semitonos: los microtonos se pierden en este camino, pero no en el Cardputer, que usará pitch bend.
 
 # RYDBERG
 
