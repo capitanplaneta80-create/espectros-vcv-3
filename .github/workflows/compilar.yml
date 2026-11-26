@@ -86,7 +86,12 @@ jobs:
         with:
           msystem: MINGW64
           update: false
-          install: make zip unzip zstd tar mingw-w64-x86_64-gcc mingw-w64-x86_64-jq
+          install: make zip unzip zstd tar mingw-w64-x86_64-gcc
+          suppress-deprecation-warnings: msystem-mingw64
+      - name: jq (MSYS2 ya no lo ofrece para MINGW64; plugin.mk lo usa para leer plugin.json)
+        run: |
+          curl -fsSL -o /usr/bin/jq.exe https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-windows-amd64.exe
+          jq --version
       - name: Rack SDK (Windows necesita la biblioteca de enlace de Rack)
         run: |
           curl -fsSL -o sdk.zip https://vcvrack.com/downloads/Rack-SDK-latest-win-x64.zip
