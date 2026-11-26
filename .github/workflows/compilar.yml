@@ -1,0 +1,131 @@
+# ESPECTROS para VCV Rack — compila el plugin para Mac, Linux y Windows y publica la biblioteca en GitHub Pages
+# Ph.D. Mauricio Vásquez Arias · Profesor titular – Investigador asociado · Escuela de Artes y Humanidades, Universidad EAFIT
+name: Compilar y publicar ESPECTROS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: espectros
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    name: Mac (Apple Silicon + Intel)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Encabezados de Rack 2.6
+        run: mkdir -p build dist && tar -xzf tools/rack-headers.tar.gz -C build
+      - name: Compilar
+        run: |
+          H=build/rack-headers
+          FL="-std=c++11 -O3 -funsafe-math-optimizations -fPIC -stdlib=libc++ -Wall -Wextra -Wno-unused-parameter -Wno-vla-cxx-extension -Wno-unknown-warning-option -I$H/include -I$H/dep/include -Inucleos"
+          LD="-shared -undefined dynamic_lookup -stdlib=libc++"
+          clang++ -arch arm64 -march=armv8-a+fp+simd -mmacosx-version-min=11.0 $FL src/*.cpp $LD -o build/arm64.dylib
+          clang++ -arch x86_64 -march=nehalem -mmacosx-version-min=10.13 $FL src/*.cpp $LD -o build/x64.dylib
+          lipo -create build/arm64.dylib build/x64.dylib -output build/plugin.dylib
+          codesign -f -s - build/plugin.dylib
+          lipo -info build/plugin.dylib
+      - name: Empaquetar
+        run: |
+          command -v zstd >/dev/null || brew install zstd
+          bash tools/empaquetar.sh build/plugin.dylib mac-arm64
+          bash tools/empaquetar.sh build/plugin.dylib mac-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-mac
+          path: dist/*.vcvplugin
+
+  linux:
+    name: Linux
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Encabezados de Rack 2.6
+        run: mkdir -p build dist && tar -xzf tools/rack-headers.tar.gz -C build
+      - name: Compilar
+        run: |
+          H=build/rack-headers
+          g++ -std=c++11 -O3 -funsafe-math-optimizations -fPIC -march=nehalem -fno-gnu-unique -Wall -Wextra -Wno-unused-parameter \
+            -Inucleos -I$H/include -I$H/dep/include src/*.cpp -shared -static-libstdc++ -static-libgcc -o build/plugin.so
+      - name: Probar los núcleos (sin Rack)
+        run: |
+          g++ -O2 -std=c++11 -o build/prueba test/nucleo_test.cpp && build/prueba
+          g++ -O2 -std=c++11 -Inucleos -o build/ganglio_test test/ganglio_test.cpp && build/ganglio_test
+          g++ -O2 -std=c++11 -Inucleos -o build/rydberg_test test/rydberg_test.cpp && build/rydberg_test
+      - name: Contrato de los núcleos (portabilidad a MetaModule, Daisy y Cardputer)
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq gcc-arm-none-eabi libstdc++-arm-none-eabi-newlib
+          bash tools/portabilidad.sh
+      - name: Empaquetar
+        run: bash tools/empaquetar.sh build/plugin.so lin-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-lin
+          path: dist/*.vcvplugin
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: make zip unzip zstd tar mingw-w64-x86_64-gcc mingw-w64-x86_64-jq
+      - name: Rack SDK (Windows necesita la biblioteca de enlace de Rack)
+        run: |
+          curl -fsSL -o sdk.zip https://vcvrack.com/downloads/Rack-SDK-latest-win-x64.zip
+          unzip -q sdk.zip
+      - name: Compilar y empaquetar
+        run: |
+          make RACK_DIR="$PWD/Rack-SDK" -j2 dist
+          ls dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-win
+          path: dist/*.vcvplugin
+
+  publicar:
+    name: Publicar la biblioteca
+    needs: [mac, linux, windows]
+    if: ${{ always() && (needs.mac.result == 'success' || needs.linux.result == 'success') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.publicar.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*
+          path: artefactos
+          merge-multiple: true
+      - name: Preparar el sitio
+        run: |
+          mkdir -p _site/plugins
+          cp -R site/* _site/
+          cp artefactos/*.vcvplugin _site/plugins/
+          cp README.md _site/manual.md
+          python3 tools/manifiesto.py _site/plugins plugin.json "$GITHUB_SHA" > _site/plugins/manifiesto.json
+          cat _site/plugins/manifiesto.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: publicar
+        uses: actions/deploy-pages@v4

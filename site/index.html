@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESPECTROS · biblioteca para VCV Rack</title>
+<style>
+  :root { --bg: #07090c; --pan: #0e131a; --line: #223040; --ink: #d8e2ea; --dim: #7d8a96; --a: #2ee6ff; --b: #ff3dc8; --h: #ffb42e; --ok: #5dffa0; --err: #ff5a6e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; padding: 16px 24px; border-bottom: 1px solid var(--line); background: #05070a; position: relative; }
+  header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: linear-gradient(90deg, var(--a), var(--b) 60%, transparent); opacity: .7; }
+  .logo { font-size: 26px; letter-spacing: .14em; font-weight: 700; }
+  .logo small { display: block; font-size: 10px; letter-spacing: .3em; color: var(--dim); font-weight: 400; }
+  .credit { border-left: 1px solid var(--line); padding-left: 16px; font-size: 12px; line-height: 1.4; }
+  .credit small { display: block; color: var(--dim); font-size: 10.5px; }
+  main { max-width: 1060px; margin: 0 auto; padding: 22px 20px 60px; }
+  h2 { font-size: 13px; letter-spacing: .22em; color: var(--dim); font-weight: 400; margin: 28px 0 10px; text-transform: uppercase; }
+  .card { background: var(--pan); border: 1px solid var(--line); border-radius: 6px; padding: 18px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  button, .btn { font: inherit; font-size: 13px; letter-spacing: .08em; background: #131b25; color: var(--ink); border: 1px solid #34465a; border-radius: 4px; padding: 9px 16px; cursor: pointer; text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { border-color: var(--a); }
+  button.main { background: linear-gradient(90deg, #0d3b46, #3a1036); border-color: var(--a); font-weight: 700; padding: 12px 22px; font-size: 14px; }
+  button:disabled { opacity: .4; cursor: default; }
+  select { font: inherit; background: #131b25; color: var(--ink); border: 1px solid #34465a; border-radius: 4px; padding: 7px 10px; }
+  code, .ruta { background: #000; border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; color: var(--a); word-break: break-all; }
+  .estado { margin-top: 14px; padding: 12px 14px; border-radius: 4px; background: #000; border: 1px solid var(--line); min-height: 44px; white-space: pre-wrap; }
+  .estado.ok { border-color: var(--ok); color: var(--ok); }
+  .estado.err { border-color: var(--err); color: var(--err); }
+  .estado.aviso { border-color: var(--h); color: var(--h); }
+  .dim { color: var(--dim); }
+  .modulos { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: 16px; }
+  .mod { display: grid; grid-template-columns: 190px 1fr; gap: 16px; background: var(--pan); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  .mod img { width: 190px; border-radius: 3px; border: 1px solid var(--line); background: #000; }
+  .mod h3 { margin: 0 0 6px; letter-spacing: .12em; font-size: 17px; }
+  .mod p { margin: 0 0 8px; font-size: 13px; }
+  .tags span { display: inline-block; font-size: 10.5px; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; margin: 0 4px 4px 0; color: var(--dim); }
+  ol { padding-left: 22px; margin: 8px 0; } li { margin: 4px 0; }
+  .kbd { border: 1px solid #44566a; border-bottom-width: 2px; border-radius: 3px; padding: 0 5px; font-size: 12px; }
+  .pill { font-size: 12px; border-radius: 12px; padding: 2px 10px; border: 1px solid var(--line); }
+  .pill.ok { border-color: var(--ok); color: var(--ok); } .pill.aviso { border-color: var(--h); color: var(--h); }
+  footer { color: var(--dim); font-size: 12px; text-align: center; padding: 30px 10px; }
+  a { color: var(--a); }
+  @media (max-width: 600px) { .mod { grid-template-columns: 1fr; } .mod img { width: 100%; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ESPECTROS<small>BIBLIOTECA PARA VCV RACK</small></div>
+  <div class="credit">Ph.D. Mauricio Vásquez Arias<small>Profesor titular – Investigador asociado · Escuela de Artes y Humanidades · Universidad EAFIT</small></div>
+</header>
+<main>
+  <div class="card">
+    <div class="row" style="justify-content: space-between">
+      <div>
+        <div style="font-size: 18px; letter-spacing: .1em"><b id="p-nombre">ESPECTROS</b> <span class="dim" id="p-version">…</span></div>
+        <div class="dim" style="font-size: 12px" id="p-fecha"></div>
+      </div>
+      <div class="row">
+        <span class="dim">tu equipo:</span>
+        <select id="sistema">
+          <option value="mac-arm64">Mac · Apple Silicon (M1, M2, M3, M4…)</option>
+          <option value="mac-x64">Mac · Intel</option>
+          <option value="win-x64">Windows</option>
+          <option value="lin-x64">Linux</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 16px">
+      <button class="main" id="instalar">INSTALAR EN VCV RACK</button>
+      <button id="carpeta">Elegir la carpeta de Rack</button>
+      <a class="btn" id="descargar" href="#">Descargar el archivo</a>
+      <span class="pill" id="instalado">—</span>
+    </div>
+    <div class="estado" id="estado">Cargando la biblioteca…</div>
+
+    <details id="ayuda" style="margin-top: 14px">
+      <summary class="dim" style="cursor: pointer">La primera vez: cómo elegir la carpeta de Rack</summary>
+      <ol>
+        <li>Cierra VCV Rack (versión 2.6 o posterior; ábrelo al menos una vez antes, para que cree su carpeta).</li>
+        <li>Pulsa <b>INSTALAR</b>. Se abre el selector de carpetas de tu sistema.</li>
+        <li id="paso-ruta">Ve a la carpeta <span class="ruta" id="ruta"></span> <button id="copiar" style="padding: 2px 8px; font-size: 11px">copiar</button></li>
+        <li id="paso-mac">En Mac esa carpeta está oculta: en el selector pulsa <span class="kbd">⌘</span> <span class="kbd">⇧</span> <span class="kbd">G</span>, pega la ruta y pulsa Ir.</li>
+        <li>Elige la carpeta <b>Rack2</b> (o la carpeta de plugins que está dentro) y acepta el permiso de escritura.</li>
+        <li>Abre VCV Rack: al arrancar instala el plugin. Busca los módulos en el navegador (clic derecho en un espacio vacío del rack).</li>
+      </ol>
+      <p class="dim">Chrome recuerda la carpeta: para actualizar, la próxima vez basta un clic en INSTALAR. La instalación directa funciona en Chrome o Edge de escritorio; en otros navegadores usa «Descargar el archivo» y cópialo a la carpeta de plugins de Rack (en Rack: Ayuda → Abrir carpeta de usuario).</p>
+    </details>
+  </div>
+
+  <h2>Módulos</h2>
+  <div class="modulos" id="modulos"></div>
+
+  <h2>Manual</h2>
+  <div class="card dim" id="manual-ref">El manual completo (panel, entradas, salidas, afinaciones e ideas de patch) está en <a id="manual-link" href="manual.md">el repositorio</a>.</div>
+</main>
+<footer>ESPECTROS · instrumentos físicos para VCV Rack · código abierto (GPL-3.0) · <span id="repo"></span></footer>
+
+<script>
+'use strict';
+// información extendida de cada módulo (el resto viene de plugin.json a través de manifiesto.json)
+const INFO = {
+  Lyapunov: {
+    img: 'img/lyapunov.png',
+    texto: 'Dos péndulos dobles casi idénticos. Suena, se ve y sale como voltaje cómo se separan: los gemelos son el estéreo, cada uno compone sus notas en 38 afinaciones no temperadas o en un archivo Scala, y el horizonte de predictibilidad es un evento.',
+  },
+  Ganglio: {
+    img: 'img/ganglio.png',
+    texto: 'Un cerebro de insecto: una red neuronal de 8 neuronas que late sola y mueve un bordón. Ocho temperamentos (GRILLO, CIGARRA, LUCIÉRNAGA…), estímulo por neurona, escucha de otro instrumento y el cerebro entero como voltaje.',
+  },
+  Rydberg: {
+    img: 'img/rydberg.png',
+    texto: 'El átomo de hidrógeno como instrumento: hasta cuatro átomos caen en cascada por sus niveles y cada salto emite un fotón que es una nota del espectro real (Lyman, Balmer, Paschen). Modos cascada, espectro y Zeeman, con la nube orbital, la escalera de niveles y el espectro en pantalla.',
+  },
+};
+const RUTAS = {
+  'mac-arm64': '~/Library/Application Support/Rack2',
+  'mac-x64': '~/Library/Application Support/Rack2',
+  'win-x64': '%LOCALAPPDATA%\\Rack2',
+  'lin-x64': '~/.local/share/Rack2',
+};
+const $ = (id) => document.getElementById(id);
+let M = null, carpeta = null;
+
+function estado(msg, clase = '') { const e = $('estado'); e.textContent = msg; e.className = 'estado ' + clase; }
+function sistema() { return $('sistema').value; }
+function archivoDe(sis) { return M && M.archivos[sis] ? M.archivos[sis].archivo : null; }
+
+// ---------- carpeta recordada (IndexedDB)
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open('espectros', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function guardar(k, v) { const db = await idb(); return new Promise((res) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); }
+async function leer(k) { const db = await idb(); return new Promise((res) => { const t = db.transaction('kv').objectStore('kv').get(k); t.onsuccess = () => res(t.result); t.onerror = () => res(null); }); }
+
+// ---------- sistema del equipo
+async function detectar() {
+  try {
+    const ua = navigator.userAgentData;
+    if (ua && ua.getHighEntropyValues) {
+      const v = await ua.getHighEntropyValues(['architecture', 'platform']);
+      if (v.platform === 'macOS') return v.architecture === 'arm' ? 'mac-arm64' : 'mac-x64';
+      if (v.platform === 'Windows') return 'win-x64';
+      if (v.platform === 'Linux') return 'lin-x64';
+    }
+  } catch (e) {}
+  const p = navigator.platform || '';
+  if (/Mac/.test(p)) return 'mac-arm64';
+  if (/Win/.test(p)) return 'win-x64';
+  return 'lin-x64';
+}
+
+function actualizarAyuda() {
+  const s = sistema();
+  $('ruta').textContent = RUTAS[s];
+  $('paso-mac').style.display = s.startsWith('mac') ? '' : 'none';
+  const f = archivoDe(s);
+  const d = $('descargar');
+  if (f) { d.href = 'plugins/' + f; d.setAttribute('download', f); d.style.opacity = 1; }
+  else { d.removeAttribute('href'); d.style.opacity = .4; }
+  $('instalar').disabled = !f;
+  if (M && !f) estado('Todavía no hay una versión compilada para este sistema. Prueba más tarde o elige otro sistema.', 'aviso');
+}
+
+// ---------- la carpeta de plugins: acepta Rack2 o la carpeta plugins-… de dentro
+async function carpetaPlugins(dir) {
+  const s = sistema();
+  if (/^plugins(-|$)/.test(dir.name)) return dir;
+  const busca = ['plugins-' + s, 'plugins'];
+  if (dir.name !== 'Rack2') { try { dir = await dir.getDirectoryHandle('Rack2'); } catch (e) {} }
+  for (const n of busca) { try { return await dir.getDirectoryHandle(n); } catch (e) {} }
+  if (dir.name === 'Rack2') return await dir.getDirectoryHandle('plugins-' + s, { create: true });   // Rack aún no la creó
+  throw new Error('Esa no parece la carpeta de VCV Rack. Elige la carpeta Rack2 (' + RUTAS[s] + ').');
+}
+
+async function permiso(h, pedir) {
+  if (!h.queryPermission) return true;
+  const o = { mode: 'readwrite' };
+  if ((await h.queryPermission(o)) === 'granted') return true;
+  return pedir ? (await h.requestPermission(o)) === 'granted' : false;
+}
+
+async function elegirCarpeta() {
+  if (window.__carpetaPrueba) return window.__carpetaPrueba;   // pruebas automáticas
+  if (!window.showDirectoryPicker) throw new Error('SIN_FSA');
+  return await window.showDirectoryPicker({ id: 'rack2', mode: 'readwrite', startIn: 'documents' });
+}
+
+async function versionInstalada(dir) {
+  const slug = M ? M.slug : 'Espectros';
+  for await (const [n] of dir.entries()) if (n.startsWith(slug + '-') && n.endsWith('.vcvplugin')) return { pendiente: true, n };
+  try {
+    const d = await dir.getDirectoryHandle(slug);
+    const t = await (await (await d.getFileHandle('plugin.json')).getFile()).text();
+    return { version: JSON.parse(t).version };
+  } catch (e) { return null; }
+}
+
+async function mostrarInstalado() {
+  const el = $('instalado');
+  if (!carpeta) { el.textContent = 'carpeta sin elegir'; el.className = 'pill'; return; }
+  if (!(await permiso(carpeta, false))) { el.textContent = 'carpeta: pulsa INSTALAR para reconectar'; el.className = 'pill'; return; }
+  const v = await versionInstalada(carpeta);
+  if (!v) { el.textContent = 'no instalado en ' + carpeta.name; el.className = 'pill'; }
+  else if (v.pendiente) { el.textContent = 'listo: se instala al abrir Rack'; el.className = 'pill aviso'; }
+  else if (M && v.version === M.version) { el.textContent = 'instalado · ' + v.version; el.className = 'pill ok'; }
+  else { el.textContent = 'instalado ' + v.version + ' · hay ' + (M ? M.version : 'otra'); el.className = 'pill aviso'; }
+}
+
+async function conectar(pedir) {
+  let d = await elegirCarpeta();
+  d = await carpetaPlugins(d);
+  if (!(await permiso(d, true))) throw new Error('Sin permiso de escritura en la carpeta.');
+  carpeta = d;
+  try { await guardar('carpeta', d); } catch (e) {}
+  return d;
+}
+
+async function instalar() {
+  const s = sistema(), f = archivoDe(s);
+  if (!f) return;
+  try {
+    if (!carpeta || !(await permiso(carpeta, true))) { estado('Elige la carpeta Rack2 en el selector…'); await conectar(true); }
+    if (!carpeta.name.endsWith(s) && carpeta.name !== 'plugins' &&
+        !confirm('La carpeta elegida es «' + carpeta.name + '», pero tu equipo es ' + s + '. ¿Instalar ahí de todos modos?')) { estado('Cancelado.'); return; }
+    estado('Descargando ' + f + '…');
+    const r = await fetch('plugins/' + f, { cache: 'no-store' });
+    if (!r.ok) throw new Error('No se pudo descargar ' + f + ' (' + r.status + ')');
+    const blob = await r.blob();
+    // quitar versiones anteriores: el paquete pendiente y la carpeta ya descomprimida
+    const viejos = [];
+    for await (const [n, h] of carpeta.entries()) if (n.startsWith(M.slug + '-') && n.endsWith('.vcvplugin') && h.kind === 'file') viejos.push(n);
+    for (const n of viejos) await carpeta.removeEntry(n);
+    try { await carpeta.removeEntry(M.slug, { recursive: true }); } catch (e) {}
+    estado('Escribiendo en ' + carpeta.name + '…');
+    const fh = await carpeta.getFileHandle(f, { create: true });
+    const w = await fh.createWritable();
+    await w.write(blob); await w.close();
+    estado('Listo: ESPECTROS ' + M.version + ' quedó en la carpeta ' + carpeta.name + '.\nAbre (o reinicia) VCV Rack: al arrancar lo instala. Busca los módulos en el navegador de módulos.', 'ok');
+  } catch (e) {
+    if (e && e.name === 'AbortError') { estado('No se eligió ninguna carpeta.'); }
+    else if (e && e.message === 'SIN_FSA') { estado('Este navegador no permite escribir en carpetas. Usa «Descargar el archivo» y cópialo a la carpeta de plugins de Rack (en Rack: Ayuda → Abrir carpeta de usuario), o abre esta página en Chrome.', 'aviso'); }
+    else if (e && (e.name === 'SecurityError' || e.name === 'NotAllowedError')) { estado('El navegador no dejó usar esa carpeta (' + e.message + ').\nPlan B: pulsa «Descargar el archivo» y cópialo a la carpeta de plugins de Rack (en Rack: Ayuda → Abrir carpeta de usuario).', 'err'); }
+    else { estado(String(e && e.message || e), 'err'); }
+    $('ayuda').open = true;
+  }
+  mostrarInstalado();
+}
+
+function pintarModulos() {
+  const c = $('modulos'); c.innerHTML = '';
+  for (const m of M.modulos) {
+    const i = INFO[m.slug] || {};
+    const d = document.createElement('div'); d.className = 'mod';
+    d.innerHTML = (i.img ? `<img src="${i.img}" alt="${m.nombre}">` : '<div></div>') +
+      `<div><h3>${m.nombre}</h3><p>${i.texto || m.descripcion}</p><div class="tags">${m.etiquetas.map((t) => `<span>${t}</span>`).join('')}</div></div>`;
+    c.appendChild(d);
+  }
+}
+
+async function inicio() {
+  // enlaces al repositorio (usuario.github.io/repo → github.com/usuario/repo)
+  const h = location.hostname.match(/^([^.]+)\.github\.io$/);
+  if (h) {
+    const repo = location.pathname.split('/').filter(Boolean)[0] || '';
+    const url = `https://github.com/${h[1]}/${repo}`;
+    $('repo').innerHTML = `<a href="${url}">${url.replace('https://', '')}</a>`;
+    $('manual-link').href = url + '#readme';
+  }
+  $('sistema').value = (await leer('sistema').catch(() => null)) || await detectar();
+  $('sistema').onchange = () => { guardar('sistema', sistema()); actualizarAyuda(); mostrarInstalado(); };
+  $('copiar').onclick = () => navigator.clipboard && navigator.clipboard.writeText($('ruta').textContent);
+  $('instalar').onclick = instalar;
+  $('carpeta').onclick = async () => { try { await conectar(true); estado('Carpeta lista: ' + carpeta.name, 'ok'); } catch (e) { estado(e.name === 'AbortError' ? 'No se eligió ninguna carpeta.' : String(e.message || e), e.name === 'AbortError' ? '' : 'err'); } mostrarInstalado(); };
+  if (!window.showDirectoryPicker && !window.__carpetaPrueba) $('carpeta').style.display = 'none';
+  try {
+    M = await (await fetch('plugins/manifiesto.json', { cache: 'no-store' })).json();
+  } catch (e) { estado('No se encontró la biblioteca compilada (plugins/manifiesto.json). Si acabas de publicar, espera a que GitHub termine de compilar.', 'err'); return; }
+  $('p-nombre').textContent = M.nombre;
+  $('p-version').textContent = 'versión ' + M.version;
+  $('p-fecha').textContent = 'compilado ' + M.fecha + (M.commit ? ' · ' + M.commit : '') + ' · sistemas: ' + Object.keys(M.archivos).join(', ');
+  pintarModulos();
+  try { carpeta = await leer('carpeta'); } catch (e) {}
+  actualizarAyuda();
+  estado(window.showDirectoryPicker ? 'Listo para instalar.' : 'Este navegador no puede escribir en carpetas: usa «Descargar el archivo», o abre esta página en Chrome o Edge.', window.showDirectoryPicker ? '' : 'aviso');
+  mostrarInstalado();
+}
+inicio();
+</script>
+</body>
+</html>
