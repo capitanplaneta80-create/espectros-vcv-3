@@ -112,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.publicar.outputs.page_url }}
+      url: ${{ steps.publicar.outputs.page_url || steps.intento.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -132,5 +132,15 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+      # GitHub tarda unos segundos en listar el artefacto recién subido: se espera y, si aun así falla, se reintenta
+      - name: Esperar a que GitHub registre el artefacto
+        run: sleep 20
+      - id: intento
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Reintento tras 45 s
+        if: steps.intento.outcome == 'failure'
+        run: sleep 45
       - id: publicar
+        if: steps.intento.outcome == 'failure'
         uses: actions/deploy-pages@v4
